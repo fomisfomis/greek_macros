@@ -13,7 +13,7 @@ from telegram.constants import ParseMode
 from telegram.ext import Application, MessageHandler, ContextTypes, filters
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
-CHAT_ID = -426485309
+CHAT_ID = -5570801890
 TZ = ZoneInfo("Europe/Athens")
 FEEDS = {
     "ERT News": "https://www.ertnews.gr/feed/",
@@ -148,7 +148,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg or not msg.text:
         return
-    print("CHAT ID:", msg.chat_id, "| TOPIC ID:", msg.message_thread_id)
     if msg.chat_id != CHAT_ID:
         return
 

@@ -148,6 +148,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg or not msg.text:
         return
+    print("CHAT ID:", msg.chat_id, "| TOPIC ID:", msg.message_thread_id)
     if msg.chat_id != CHAT_ID:
         return
 

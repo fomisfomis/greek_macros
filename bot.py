@@ -14,11 +14,14 @@ from telegram.ext import Application, MessageHandler, ContextTypes, filters
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = -5570801890
-TZ = ZoneInfo("Europe/Athens")
-FEEDS = {
+TZ_GR = ZoneInfo("Europe/Athens")
+TZ_NL = ZoneInfo("Europe/Amsterdam")
+
+GR_FEEDS = {
     "ERT News": "https://www.ertnews.gr/feed/",
     "in.gr": "https://www.in.gr/feed/",
 }
+NL_FEED = "https://nltimes.nl/rssfeed2"
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 MODEL = "claude-sonnet-5"
@@ -41,10 +44,10 @@ def clean(text: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", text or "")).strip()
 
 
-def fetch_articles(limit_per_feed=15):
+def fetch_articles(feeds: dict, limit_per_feed=15):
     articles = []
     headers = {"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"}
-    for source, url in FEEDS.items():
+    for source, url in feeds.items():
         try:
             resp = requests.get(url, headers=headers, timeout=10)
             resp.raise_for_status()
@@ -63,7 +66,25 @@ def fetch_articles(limit_per_feed=15):
     return articles
 
 
-def pick_top3(articles):
+def render_block(title_line: str, picks: list, by_id: dict) -> str:
+    lines = [title_line]
+    for i, p in enumerate(picks):
+        art = by_id.get(p.get("id"))
+        block = (
+            f"{NUMBERS[i]} {html.escape(p.get('emoji', '📰'))} "
+            f"<b>{html.escape(p.get('headline', ''))}</b>\n"
+            f"{html.escape(p.get('summary', ''))}"
+        )
+        if art and art["link"]:
+            link = html.escape(art["link"], quote=True)
+            block += f'\n🔗 <a href="{link}">Read on {html.escape(art["source"])}</a>'
+        lines.append(block)
+    return "\n\n".join(lines)
+
+
+# ---------- Greek news ----------
+
+def pick_top3_gr(articles):
     listing = "\n".join(
         f"[{a['id']}] ({a['source']}) {a['title']}: {a['summary']}" for a in articles
     )
@@ -81,24 +102,11 @@ def pick_top3(articles):
     return data[:3]
 
 
-def build_news_block() -> str:
-    articles = fetch_articles()
+def build_news_block_gr() -> str:
+    articles = fetch_articles(GR_FEEDS)
     by_id = {a["id"]: a for a in articles}
-    picks = pick_top3(articles)
-
-    lines = ["🇬🇷 <b>Top 3 news in Greece</b>"]
-    for i, p in enumerate(picks):
-        art = by_id.get(p.get("id"))
-        block = (
-            f"{NUMBERS[i]} {html.escape(p.get('emoji', '📰'))} "
-            f"<b>{html.escape(p.get('headline', ''))}</b>\n"
-            f"{html.escape(p.get('summary', ''))}"
-        )
-        if art and art["link"]:
-            link = html.escape(art["link"], quote=True)
-            block += f'\n🔗 <a href="{link}">Read on {html.escape(art["source"])}</a>'
-        lines.append(block)
-    return "\n\n".join(lines)
+    picks = pick_top3_gr(articles)
+    return render_block("🇬🇷 <b>Top 3 news in Greece</b>", picks, by_id)
 
 
 def build_macro_block() -> str:
@@ -126,16 +134,80 @@ def build_macro_block() -> str:
     return "\n".join(lines)
 
 
-def build_message() -> str:
-    date = datetime.now(TZ).strftime("%A, %d %B %Y")
+def build_message_gr() -> str:
+    date = datetime.now(TZ_GR).strftime("%A, %d %B %Y")
     header = f"<i>{html.escape(date)}</i>"
-    news = build_news_block()
+    news = build_news_block_gr()
     macros = build_macro_block()
     return f"{header}\n\n{news}\n\n{macros}"
 
 
+# ---------- Dutch news ----------
+
+def pick_nl_stories(articles):
+    listing = "\n".join(
+        f"[{a['id']}] {a['title']}: {a['summary']}" for a in articles
+    )
+    prompt = (
+        "Below are today's headlines from NL Times (Netherlands news in English), "
+        "each with an id in square brackets. Two tasks:\n"
+        "1. Identify ALL stories that are primarily business, economy, companies, "
+        "trade, or finance related.\n"
+        "2. From the REMAINING stories (not business), pick the 3 most important "
+        "for the Netherlands.\n\n"
+        "Return ONLY a JSON object, no other text, no code fences, in this exact "
+        'shape: {"business": [...], "top3": [...]}. Each item in both arrays is '
+        'an object with: "id" (the number from the list), "headline" (a short '
+        'punchy headline in English, max 10 words), "summary" (1-2 sentences in '
+        'English), "emoji" (one emoji that fits the topic). Cap "business" at 6 '
+        "items even if more qualify, keeping the most significant.\n\n" + listing
+    )
+    raw = ask_claude(prompt, max_tokens=3000)
+    data = json.loads(raw[raw.index("{"): raw.rindex("}") + 1])
+    return data.get("business", []), data.get("top3", [])[:3]
+
+
+def build_message_nl() -> str:
+    articles = fetch_articles({"NL Times": NL_FEED}, limit_per_feed=40)
+    by_id = {a["id"]: a for a in articles}
+    business, top3 = pick_nl_stories(articles)
+
+    date = datetime.now(TZ_NL).strftime("%A, %d %B %Y")
+    header = f"<i>{html.escape(date)}</i>"
+
+    biz_lines = ["💼 <b>Netherlands: business news</b>"]
+    for b in business:
+        art = by_id.get(b.get("id"))
+        block = (
+            f"{html.escape(b.get('emoji', '📰'))} "
+            f"<b>{html.escape(b.get('headline', ''))}</b>\n"
+            f"{html.escape(b.get('summary', ''))}"
+        )
+        if art and art["link"]:
+            link = html.escape(art["link"], quote=True)
+            block += f'\n🔗 <a href="{link}">Read on NL Times</a>'
+        biz_lines.append(block)
+    biz_block = "\n\n".join(biz_lines)
+
+    top3_block = render_block("🇳🇱 <b>Top 3 news in the Netherlands</b>", top3, by_id)
+
+    return f"{header}\n\n{biz_block}\n\n{top3_block}"
+
+
+# ---------- Sending ----------
+
 async def send_daily_news(context: ContextTypes.DEFAULT_TYPE):
-    text = await asyncio.to_thread(build_message)
+    text = await asyncio.to_thread(build_message_gr)
+    await context.bot.send_message(
+        chat_id=context.job.chat_id,
+        text=text,
+        parse_mode=ParseMode.HTML,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )
+
+
+async def send_daily_nl_news(context: ContextTypes.DEFAULT_TYPE):
+    text = await asyncio.to_thread(build_message_nl)
     await context.bot.send_message(
         chat_id=context.job.chat_id,
         text=text,
@@ -169,7 +241,8 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
-    app.job_queue.run_daily(send_daily_news, time=time(9, 0, tzinfo=TZ), chat_id=CHAT_ID)
+    app.job_queue.run_daily(send_daily_news, time=time(8, 0, tzinfo=TZ_GR), chat_id=CHAT_ID)
+    app.job_queue.run_daily(send_daily_nl_news, time=time(8, 0, tzinfo=TZ_NL), chat_id=CHAT_ID)
     app.run_polling()
 
 

@@ -136,10 +136,11 @@ def build_macro_block() -> str:
 
 def build_message_gr() -> str:
     date = datetime.now(TZ_GR).strftime("%A, %d %B %Y")
+    title = "🇬🇷 <b>Daily GR News</b>"
     header = f"<i>{html.escape(date)}</i>"
     news = build_news_block_gr()
     macros = build_macro_block()
-    return f"{header}\n\n{news}\n\n{macros}"
+    return f"{title}\n{header}\n\n{news}\n\n{macros}"
 
 
 # ---------- Dutch news ----------
@@ -173,6 +174,7 @@ def build_message_nl() -> str:
     business, top3 = pick_nl_stories(articles)
 
     date = datetime.now(TZ_NL).strftime("%A, %d %B %Y")
+    title = "🇳🇱 <b>Daily NL News</b>"
     header = f"<i>{html.escape(date)}</i>"
 
     biz_lines = ["💼 <b>Netherlands: business news</b>"]
@@ -191,7 +193,7 @@ def build_message_nl() -> str:
 
     top3_block = render_block("🇳🇱 <b>Top 3 news in the Netherlands</b>", top3, by_id)
 
-    return f"{header}\n\n{biz_block}\n\n{top3_block}"
+    return f"{title}\n{header}\n\n{biz_block}\n\n{top3_block}"
 
 
 # ---------- Sending ----------

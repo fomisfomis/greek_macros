@@ -13,7 +13,8 @@ from telegram.constants import ParseMode
 from telegram.ext import Application, MessageHandler, ContextTypes, filters
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
-CHAT_ID = -5570801890
+NEWS_CHAT_ID = -5570801890
+FM_CHAT_ID = -426485309
 TZ_GR = ZoneInfo("Europe/Athens")
 TZ_NL = ZoneInfo("Europe/Amsterdam")
 
@@ -35,7 +36,7 @@ def ask_claude(prompt: str, max_tokens: int = 2000, web_search: bool = False) ->
         messages=[{"role": "user", "content": prompt}],
     )
     if web_search:
-        kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
+        kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
     resp = client.messages.create(**kwargs)
     return "".join(b.text for b in resp.content if b.type == "text")
 
@@ -109,38 +110,12 @@ def build_news_block_gr() -> str:
     return render_block("🇬🇷 <b>Top 3 news in Greece</b>", picks, by_id)
 
 
-def build_macro_block() -> str:
-    prompt = (
-        "Search for the most recent available values of these Greek economic "
-        "indicators: annual inflation rate (CPI), 10-year government bond yield, "
-        "unemployment rate, the ECB key interest rate (deposit facility rate, "
-        "which applies to Greece as a eurozone member), and annual GDP growth rate. "
-        "Return ONLY a JSON array, no other text, no code fences. Each object has: "
-        '"label" (short name), "value" (the figure with its unit, e.g. "3.2%"), '
-        '"period" (e.g. "August 2026" or "Q2 2026"), "emoji" (one fitting emoji). '
-        "Use the most recent officially reported figure for each, even if the "
-        "periods differ between indicators."
-    )
-    raw = ask_claude(prompt, max_tokens=2000, web_search=True)
-    data = json.loads(raw[raw.index("["): raw.rindex("]") + 1])
-
-    lines = ["📊 <b>Greece: key economic indicators</b>"]
-    for d in data:
-        lines.append(
-            f"{html.escape(d.get('emoji', '•'))} <b>{html.escape(d.get('label', ''))}:</b> "
-            f"{html.escape(d.get('value', ''))} "
-            f"<i>({html.escape(d.get('period', ''))})</i>"
-        )
-    return "\n".join(lines)
-
-
 def build_message_gr() -> str:
     date = datetime.now(TZ_GR).strftime("%A, %d %B %Y")
     title = "🇬🇷 <b>Daily GR News</b>"
     header = f"<i>{html.escape(date)}</i>"
     news = build_news_block_gr()
-    macros = build_macro_block()
-    return f"{title}\n{header}\n\n{news}\n\n{macros}"
+    return f"{title}\n{header}\n\n{news}"
 
 
 # ---------- Dutch news ----------
@@ -169,7 +144,7 @@ def pick_nl_stories(articles):
 
 
 def build_message_nl() -> str:
-    articles = fetch_articles({"NL Times": NL_FEED}, limit_per_feed=40)
+    articles = fetch_articles({"NL Times": NL_FEED}, limit_per_feed=20)
     by_id = {a["id"]: a for a in articles}
     business, top3 = pick_nl_stories(articles)
 
@@ -218,33 +193,23 @@ async def send_daily_nl_news(context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ---------- TEMPORARY: discover Health topic ID ----------
+
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg or not msg.text:
         return
-    if msg.chat_id != CHAT_ID:
-        return
 
-    bot_username = context.bot.username
-    mentioned = f"@{bot_username}".lower() in msg.text.lower()
-    replied_to_bot = (
-        msg.reply_to_message
-        and msg.reply_to_message.from_user
-        and msg.reply_to_message.from_user.id == context.bot.id
-    )
-    if not (mentioned or replied_to_bot):
-        return
-
-    question = msg.text.replace(f"@{bot_username}", "").strip()
-    answer = await asyncio.to_thread(ask_claude, question, 2000, True)
-    await msg.reply_text(answer)
+    if msg.chat_id == FM_CHAT_ID:
+        print("FM CHAT ID:", msg.chat_id, "| TOPIC ID:", msg.message_thread_id)
+    return
 
 
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
-    app.job_queue.run_daily(send_daily_news, time=time(8, 0, tzinfo=TZ_GR), chat_id=CHAT_ID)
-    app.job_queue.run_daily(send_daily_nl_news, time=time(8, 0, tzinfo=TZ_NL), chat_id=CHAT_ID)
+    app.job_queue.run_daily(send_daily_news, time=time(8, 0, tzinfo=TZ_GR), chat_id=NEWS_CHAT_ID)
+    app.job_queue.run_daily(send_daily_nl_news, time=time(8, 0, tzinfo=TZ_NL), chat_id=NEWS_CHAT_ID)
     app.run_polling()
 
 

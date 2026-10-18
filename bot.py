@@ -8,13 +8,12 @@ import feedparser
 import anthropic
 from datetime import time, datetime
 from zoneinfo import ZoneInfo
-from telegram import Update, LinkPreviewOptions
+from telegram import LinkPreviewOptions
 from telegram.constants import ParseMode
-from telegram.ext import Application, MessageHandler, ContextTypes, filters
+from telegram.ext import Application, ContextTypes
 
 TOKEN = os.environ["TELEGRAM_TOKEN"]
 NEWS_CHAT_ID = -5570801890
-FM_CHAT_ID = -426485309
 TZ_GR = ZoneInfo("Europe/Athens")
 TZ_NL = ZoneInfo("Europe/Amsterdam")
 
@@ -29,15 +28,12 @@ MODEL = "claude-sonnet-5"
 NUMBERS = ["1️⃣", "2️⃣", "3️⃣"]
 
 
-def ask_claude(prompt: str, max_tokens: int = 2000, web_search: bool = False) -> str:
-    kwargs = dict(
+def ask_claude(prompt: str, max_tokens: int = 2000) -> str:
+    resp = client.messages.create(
         model=MODEL,
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt}],
     )
-    if web_search:
-        kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
-    resp = client.messages.create(**kwargs)
     return "".join(b.text for b in resp.content if b.type == "text")
 
 
@@ -193,21 +189,8 @@ async def send_daily_nl_news(context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ---------- TEMPORARY: discover Health topic ID ----------
-
-async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    if not msg or not msg.text:
-        return
-
-    if msg.chat_id == FM_CHAT_ID:
-        print("FM CHAT ID:", msg.chat_id, "| TOPIC ID:", msg.message_thread_id)
-    return
-
-
 def main():
     app = Application.builder().token(TOKEN).build()
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
     app.job_queue.run_daily(send_daily_news, time=time(8, 0, tzinfo=TZ_GR), chat_id=NEWS_CHAT_ID)
     app.job_queue.run_daily(send_daily_nl_news, time=time(8, 0, tzinfo=TZ_NL), chat_id=NEWS_CHAT_ID)
     app.run_polling()

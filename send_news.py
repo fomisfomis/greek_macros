@@ -3,6 +3,19 @@ from datetime import datetime
 from telegram import Bot, LinkPreviewOptions
 from telegram.constants import ParseMode
 import bot
+import json as _json
+
+_orig_pick_nl = bot.pick_nl_stories
+def _retry(*a, **k):
+    last = None
+    for i in range(3):
+        try:
+            return _orig_pick_nl(*a, **k)
+        except _json.JSONDecodeError as e:
+            last = e
+            print("pick_nl_stories retry", i + 1, repr(e))
+    raise last
+bot.pick_nl_stories = _retry
 
 STATE = "sent.json"
 

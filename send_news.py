@@ -1,8 +1,21 @@
-import asyncio, sys
+import asyncio, sys, json
 from datetime import datetime
 from telegram import Bot, LinkPreviewOptions
 from telegram.constants import ParseMode
 import bot
+
+STATE = "sent.json"
+
+def load():
+    try:
+        with open(STATE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save(state):
+    with open(STATE, "w") as f:
+        json.dump(state, f)
 
 async def send(which):
     build = bot.build_message_gr if which == "gr" else bot.build_message_nl
@@ -12,11 +25,31 @@ async def send(which):
             parse_mode=ParseMode.HTML,
             link_preview_options=LinkPreviewOptions(is_disabled=True))
 
-if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        asyncio.run(send(sys.argv[1]))
+TZS = {"gr": bot.TZ_GR, "nl": bot.TZ_NL}
+
+def main():
+    state = load()
+    failed = False
+    if len(sys.argv) > 1 and sys.argv[1] in TZS:
+        keys = [sys.argv[1]]            # manual run: send now, then record
+        force = True
     else:
-        if datetime.now(bot.TZ_GR).hour == 8:
-            asyncio.run(send("gr"))
-        if datetime.now(bot.TZ_NL).hour == 8:
-            asyncio.run(send("nl"))
+        keys = ["gr", "nl"]             # scheduled run: only if due and not yet sent today
+        force = False
+    for key in keys:
+        now = datetime.now(TZS[key])
+        today = now.date().isoformat()
+        due = 8 <= now.hour < 12 and state.get(key) != today
+        if force or due:
+            try:
+                asyncio.run(send(key))
+                state[key] = today
+                save(state)
+            except Exception as e:
+                print("FAILED", key, repr(e))
+                failed = True
+    if failed:
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
